@@ -1,4 +1,3 @@
-
 #include <windows.h>
 #include <Windowsx.h>
 #include <gdiplus.h>
@@ -9,7 +8,9 @@
 #include <tchar.h>
 #include <string>
 #include <vector>
+#include <deque>
 #include <cmath>
 
 #include "TextManager.h"
 #include "Structures.h"
+#include "resource.h"

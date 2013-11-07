@@ -9,6 +9,7 @@ TextManager::TextManager(HWND hWnd)
 	textManagerState.caretPosition = 0;
 	textManagerState.endSelection = -1;
 	textManagerState.startSelection = -1;
+	imageIndex = -1;
 	scale = 1;
 
 	wstring fontNames[] = {L"comic.ttf", L"cour.ttf"};
@@ -41,42 +42,55 @@ TextManager::~TextManager(void)
 	{
 		RemoveFontResourceEx(fontNames[i].c_str(), FR_PRIVATE, NULL);
 	}
+
+	for (int i = 0; i < images.size(); ++i)
+	{
+		delete images.at(i);
+	}
+	images.clear();
 }
 
 
 void TextManager::InsertChar(TCHAR char_code)
 {
+	SaveInHistory();
 	DeleteSelection();
 	textManagerState.caretPosition = min(textManagerState.caretPosition, textManagerState.text.size());
 	textManagerState.caretPosition = max(textManagerState.caretPosition, 0);
 	textManagerState.text.insert(textManagerState.caretPosition++, &char_code, 1);
-	//historyManager.SetCurrentState(currentState);
 	InvalidateRect(hWnd, NULL, false);
 }
 
+void TextManager::InsertChars(const std::wstring &str)
+{
+	SaveInHistory();
+	DeleteSelection();
+	textManagerState.text.insert(textManagerState.caretPosition, str);
+	textManagerState.caretPosition += str.size();
+	InvalidateRect(hWnd, NULL, false);
+}
 
 void TextManager::RemoveChars()
 {
+	SaveInHistory();
 	if (textManagerState.startSelection != -1 && textManagerState.endSelection != -1)
 	{
 		DeleteSelection();
-		//historyManager.SetCurrentState(currentState);
+		InvalidateRect(hWnd, NULL, false);
 		return;
 	}
 	--textManagerState.caretPosition;
-	while (textManagerState.caretPosition > 0 && (textManagerState.text.at(textManagerState.caretPosition - 1) >> 8) == 0xfe)
+	while (textManagerState.caretPosition > 0 && (textManagerState.text.at(textManagerState.caretPosition - 1) >> 8) == FONT)
 	{
 		textManagerState.text.erase(--textManagerState.caretPosition, 1);
 	}
 	++textManagerState.caretPosition;
 	if (textManagerState.caretPosition > 0)
 	{
-		textManagerState.text.erase(--textManagerState.caretPosition, 1);
-		
+		textManagerState.text.erase(--textManagerState.caretPosition, 1);	
 	}
 	textManagerState.caretPosition = min(textManagerState.caretPosition, textManagerState.text.size() - 1);
-	
-	//historyManager.SetCurrentState(currentState);
+	InvalidateRect(hWnd, NULL, false);
 }
 
 void TextManager::DeleteSelection()
@@ -111,69 +125,63 @@ void TextManager::RenderText(HDC hdc, LPRECT clientRect)
 	SetRect(&r, 0, 0, width, height);
 	FillRect(bufferDC, &r, (HBRUSH) GetStockObject(WHITE_BRUSH));
 
-	//clientRect->right -= RIGHT_MARGIN;
 	int curX = 0;
 	int curY = 0;
 	int nextLineY = 0;
-	int startLinePos = -1;
 
 	Line currentLine;
 	
 	lines.clear();
 	
 	SelectObject(bufferDC, fontDescriptors[1]);
-
-	HFONT hOldFont = fontDescriptors[0];
-	
 	SetCaretPos(0, 0);
 
-	if (!textManagerState.text.empty())
+	SIZE size;
+	for (UINT i = 0; i < textManagerState.text.length(); ++i)
 	{
-		for (UINT i = 0; i < textManagerState.text.length(); ++i)
+		GetItemSize(bufferDC, textManagerState.text.at(i), size);
+		nextLineY = max(nextLineY, curY + size.cy);
+		
+		if (curX + size.cx >= width || textManagerState.text.at(i) == L'\r')
 		{
-			SIZE size;
-			GetItemSize(bufferDC, textManagerState.text.at(i), size);
-			if (curX + size.cx >= (clientRect->right - clientRect->left) || textManagerState.text.at(i) == L'\r')
-			{
-				currentLine.startY = curY;
-				currentLine.endY = nextLineY;
-				curX = 0;
-				curY = nextLineY;
-				lines.push_back(currentLine);
-				currentLine.charsStartX.clear();
-			}
+			currentLine.startY = curY;
+			currentLine.endY = nextLineY;
+			curX = 0;
+			curY = nextLineY;
+			lines.push_back(currentLine);
+			currentLine.charsStartX.clear();
+		}
 
-			nextLineY = max(nextLineY, curY + size.cy);
+		if (i >= min(textManagerState.startSelection, textManagerState.endSelection)
+			&& i < max(textManagerState.startSelection, textManagerState.endSelection))
+		{
+			SetTextColor(bufferDC, RGB(255, 255, 255));
+			SetBkColor(bufferDC, RGB(100, 100, 100));
+		}
+		else
+		{
+			SetTextColor(bufferDC, RGB(0, 0, 0));
+			SetBkColor(bufferDC, RGB(255, 255, 255));
+		}
 
-			if (i >= min(textManagerState.startSelection, textManagerState.endSelection)
-				&& i < max(textManagerState.startSelection, textManagerState.endSelection))
-			{
-				SetTextColor(bufferDC, RGB(255, 255, 255));
-				SetBkColor(bufferDC, RGB(80, 80, 80));
-			}
-			else
-			{
-				SetTextColor(bufferDC, RGB(0, 0, 0));
-				SetBkColor(bufferDC, RGB(255, 255, 255));
-			}
+		if (textManagerState.text.at(i) != L'\r')
+		{
+			RenderItem(bufferDC, curX, curY, textManagerState.text.at(i));
+		}
 
-			if (textManagerState.text.at(i) != L'\r')
-			{
-				RenderItem(bufferDC, curX, curY, textManagerState.text.at(i));
-			}
+		currentLine.charsStartX.push_back(curX);
+		curX += size.cx;
 
-			currentLine.charsStartX.push_back(curX);
-			curX += size.cx;
+		if (textManagerState.caretPosition == (i + 1))
+		{
+			SetCaretPos(curX, curY);
+		}
 
-			if (textManagerState.caretPosition == (i + 1))
-			{
-				SetCaretPos(curX, curY);
-			}
-
-			if (i + 1 == textManagerState.text.size())
-			{
-				lines.push_back(currentLine);
-			}
+		if (i + 1 == textManagerState.text.size())
+		{
+			currentLine.startY = curY;
+			currentLine.endY = nextLineY;
+			lines.push_back(currentLine);
 		}
 	}
 
@@ -194,13 +202,13 @@ void TextManager::RenderText(HDC hdc, LPRECT clientRect)
 void TextManager::GetItemSize(HDC hdc, TCHAR item, SIZE &size)
 {
 	ZeroMemory(&size, sizeof(size));
-	if ((item >> 8) == 0xff)
+	if ((item >> 8) == IMAGE)
 	{
-		//Gdiplus::Bitmap *bitmap = imagesManager->GetImage(item & 0xff);
-		//size.cx = bitmap->GetWidth() * scale;
-		//size.cy = bitmap->GetHeight() * scale;
+		Gdiplus::Bitmap *bitmap = images.at(item & IMAGE);
+		size.cx = bitmap->GetWidth() * scale;
+		size.cy = bitmap->GetHeight() * scale;
 	}
-	else if ((item >> 8) == 0xfe)
+	else if ((item >> 8) == FONT)
 	{
 		size.cx = 0;
 		size.cy = 0;
@@ -210,7 +218,7 @@ void TextManager::GetItemSize(HDC hdc, TCHAR item, SIZE &size)
 		GetTextExtentPoint32(hdc, &item, 1, &size);
 	}
 
-	if (item == L'\r' || (item >> 8) == 0xfe)
+	if (item == L'\r' || (item >> 8) == FONT)
 	{
 		size.cx = 0;
 	}
@@ -219,19 +227,27 @@ void TextManager::GetItemSize(HDC hdc, TCHAR item, SIZE &size)
 
 void TextManager::RenderItem(HDC hdc, int x, int y, TCHAR item)
 {
-	if ((item >> 8) == 0xff)
+	if ((item >> 8) == IMAGE)
 	{
-		//DrawImage(hdc, x, y, imagesManager->GetImage(item & 0xff));
+		Gdiplus::Bitmap* image = images.at(item & IMAGE);
+		HBITMAP hBitmap;
+		image->GetHBITMAP(Gdiplus::Color::White, &hBitmap);
+
+		HDC memoryDC = CreateCompatibleDC(hdc);
+		SelectObject(memoryDC, hBitmap);
+		StretchBlt(hdc, x, y, image->GetWidth() * scale, image->GetHeight() * scale, memoryDC, 
+			0, 0, image->GetWidth(), image->GetHeight(), SRCCOPY);
+		DeleteDC(memoryDC);
 	}
-	else if ((item >> 8) == 0xfe)
+	else if ((item >> 8) == FONT)
 	{
-		if (item & 0xff)
+		if (item & IMAGE)
 		{
 			SelectObject(hdc, fontDescriptors[1]);
 		}
 		else
 		{
-			SelectObject(hdc, fontDescriptors[item & 0xff]);
+			SelectObject(hdc, fontDescriptors[item & IMAGE]);
 		}
 	}
 	else
@@ -266,16 +282,17 @@ void TextManager::ApplyScale()
 
 void TextManager::MouseUp(int x, int y)
 {
-	/*
-	if (dragImageIndex != -1)
+	SaveInHistory();
+	
+	if (imageIndex != -1)
 	{
-		TCHAR imageTag = textManagerState.text.at(dragImageIndex);
-		textManagerState.text.erase(dragImageIndex, 1);
-		textManagerState.caretPosition = max(dragImageIndex < textManagerState.caretPosition ? textManagerState.caretPosition - 1 : textManagerState.caretPosition, 0);
-		Insert(imageTag);
-		dragImageIndex = -1;
+		TCHAR imageTag = textManagerState.text.at(imageIndex);
+		textManagerState.text.erase(imageIndex, 1);
+		textManagerState.caretPosition = max(imageIndex < textManagerState.caretPosition ? textManagerState.caretPosition - 1 : textManagerState.caretPosition, 0);
+		InsertChar(imageTag);
+		imageIndex = -1;
 	}
-	else*/ if (textManagerState.startSelection == textManagerState.endSelection
+	else if (textManagerState.startSelection == textManagerState.endSelection
 		|| textManagerState.startSelection == -1
 		|| textManagerState.endSelection == -1)
 	{
@@ -284,7 +301,6 @@ void TextManager::MouseUp(int x, int y)
 		textManagerState.startSelection = -1;
 	}
 	
-	//historyManager.SetCurrentState(currentState);
 	InvalidateRect(hWnd, NULL, false);
 }
 
@@ -294,11 +310,65 @@ void TextManager::MouseDown(int x, int y)
 	textManagerState.startSelection = -1;
 	int charIndex = 0;
 	textManagerState.startSelection = GetCursorPos(x, y, charIndex);
-	if (!textManagerState.text.empty() &&(textManagerState.text.at(charIndex) >> 8) == 0xff)
+	if (!textManagerState.text.empty() && (textManagerState.text.at(charIndex) >> 8) == IMAGE)
 	{
-		//dragImageIndex = charIndex;
+		imageIndex = charIndex;
 	}
 	ShowCaret(hWnd);
+}
+
+void TextManager::MouseDoubleClick()
+{
+	int currentIndex = textManagerState.caretPosition;
+	currentIndex = min(currentIndex, textManagerState.text.size() - 1);
+	currentIndex = max(currentIndex, 0);
+	
+	TCHAR ch;
+	while (!textManagerState.text.empty() && !((ch = textManagerState.text.at(currentIndex)) == ' ' ||
+						(ch >> 8) == IMAGE || ch == '\n' || ch == '\r' || ch == '\t' || ch == ',' || ch == '.'))
+	{
+		textManagerState.endSelection = currentIndex + 1;
+		currentIndex++;
+		if (currentIndex >= textManagerState.text.size())
+		{
+			break;
+		}
+	}
+
+	currentIndex = min(textManagerState.caretPosition, textManagerState.text.size() - 1);
+	while (!textManagerState.text.empty() && !((ch = textManagerState.text.at(currentIndex)) == ' ' ||
+						(ch >> 8) == IMAGE || ch == '\n' || ch == '\r' || ch == '\t' || ch == ',' || ch == '.'))
+	{
+		textManagerState.startSelection = currentIndex;
+		currentIndex--;
+		if (currentIndex < 0)
+		{
+			break;
+		}
+	}
+
+	textManagerState.caretPosition = textManagerState.endSelection;
+
+	InvalidateRect(hWnd, NULL, false);
+}
+
+void TextManager::MouseMove(int x, int y, bool leftButtonPressed)
+{
+	if (leftButtonPressed)
+	{
+		if (imageIndex != -1)
+		{
+			int charIndex = 0;
+			textManagerState.caretPosition = GetCursorPos(x, y, charIndex);
+			InvalidateRect(hWnd, NULL, false);
+		}
+		else
+		{
+			int charIndex = 0;
+			textManagerState.caretPosition = textManagerState.endSelection = GetCursorPos(x, y, charIndex);
+			InvalidateRect(hWnd, NULL, false);
+		}
+	}
 }
 
 void TextManager::MouseWheelDown()
@@ -309,7 +379,7 @@ void TextManager::MouseWheelDown()
 
 void TextManager::MouseWheelUp()
 {
-	scale = min(scale + 0.1, 2);
+	scale = min(scale + 0.1, 5);
 	TextManager::ApplyScale();
 }
 
@@ -324,36 +394,184 @@ void TextManager::LeaveFocus()
 	DestroyCaret();
 }
 
-int TextManager::GetCursorPos(int x, int y, int &outIndex)
+int TextManager::GetCursorPos(int x, int y, int &charIndex)
 {
-	Line *line = &lines.at(0);
 	int position = 0;
-	for (UINT i = 0; i < lines.size(); ++i)
+	for (UINT i = 0; i < lines.size(); i++)
 	{
-		line = &lines[i];
 		if (lines[i].startY <= y && lines[i].endY >= y)
 		{
-			break;
+			for (int j = 0; j < (lines[i].charsStartX.size() - 1); j++)
+			{
+				if (lines[i].charsStartX[j] <= x && lines[i].charsStartX[j + 1] >= x)
+				{
+					charIndex = position + j;
+					return position + j + 
+						(x > (lines[i].charsStartX[j+1]+lines[i].charsStartX[j])/2 ? 1 : 0);
+				}
+			}
+			return position + lines[i].charsStartX.size();
 		}
-		else if (i + 1 != lines.size())
-		{
-			position += lines[i].charsStartX.size();
-		}
+		
+		position += lines[i].charsStartX.size();
 	}
 
-	for (int i = 0; i < ((int) line->charsStartX.size() - 1); ++i)
+	charIndex = textManagerState.text.size() - 1;
+	return position;
+}
+
+void TextManager::ApplyFont(int fontCode)
+{
+	SaveInHistory();
+	if (textManagerState.startSelection == -1 || textManagerState.endSelection == -1)
 	{
-		if (line->charsStartX[i + 1] - line->charsStartX[i] == 0)
-		{
-			continue;
-		}
-		if (line->charsStartX[i] <= x && line->charsStartX[i + 1] >= x)
-		{
-			int charMid = (line->charsStartX[i + 1] + line->charsStartX[i]) / 2;
-			outIndex = position + i;
-			return position + (x > charMid ? ++i : i);
-		}
+		return;
 	}
-	outIndex = textManagerState.text.size() - 1;
-	return max((lines.size() == 1 ? 0 : position) + (int)line->charsStartX.size(), 0);
+	int startPos = min(textManagerState.startSelection, textManagerState.endSelection);
+	int endPos = max(textManagerState.startSelection, textManagerState.endSelection);
+	TCHAR fontSymbol = 0xfe00 + fontCode;
+	for (int i = startPos; i < endPos; ++endPos, i += 2)
+	{
+		textManagerState.text.insert(i, &fontSymbol, 1);
+	}
+
+	textManagerState.caretPosition = endPos;
+	textManagerState.startSelection = -1;
+	textManagerState.endSelection = -1;
+	
+	InvalidateRect(hWnd, NULL, false);
+}
+
+void TextManager::InsertImage()
+{
+	OPENFILENAME openFileStruct = {0};
+	TCHAR filename[256] = {0};
+
+	openFileStruct.lStructSize = sizeof(openFileStruct);
+	openFileStruct.lpstrFile = filename;
+	openFileStruct.nMaxFile = sizeof(filename);
+
+	GetOpenFileName(&openFileStruct);
+	std::wstring filePath((LPWSTR) &filename);
+
+	if (!filePath.empty())
+	{
+		Gdiplus::Bitmap *image = new Gdiplus::Bitmap(filePath.c_str());
+		images.push_back(image);
+		InsertChar((TCHAR) (0xff00 + images.size() - 1));
+	}
+}
+
+void TextManager::SaveInHistory()
+{
+	undoDeque.push_front(textManagerState);
+	while (undoDeque.size() > 10)
+	{
+		undoDeque.pop_back();
+	}
+	redoDeque.clear();
+}
+
+void TextManager::Undo()
+{
+	if (!undoDeque.empty())
+	{
+		redoDeque.push_front(textManagerState);
+		textManagerState = undoDeque.front();
+		undoDeque.pop_front();
+	}
+	InvalidateRect(hWnd, NULL, false);
+}
+
+void TextManager::Redo()
+{
+	if (!redoDeque.empty())
+	{
+		undoDeque.push_front(textManagerState);
+		textManagerState = redoDeque.front();
+		redoDeque.pop_front();
+	}
+	InvalidateRect(hWnd, NULL, false);
+}
+
+std::wstring TextManager::GetSelectedText()
+{
+	if (textManagerState.startSelection == -1 || textManagerState.endSelection == -1 || textManagerState.text.empty())
+	{
+		return L"";
+	}
+
+	int startPos = min(textManagerState.startSelection, textManagerState.endSelection);
+	int endPos = max(textManagerState.startSelection, textManagerState.endSelection);
+	
+	std::wstring result(textManagerState.text, startPos, endPos - startPos);
+	return result;
+}
+
+
+void TextManager::SaveFile()
+{
+	OPENFILENAME openFileStruct = {0};
+	TCHAR filename[256] = {0};
+
+	openFileStruct.lStructSize = sizeof(openFileStruct);
+	openFileStruct.lpstrFile = filename;
+	openFileStruct.nMaxFile = sizeof(filename);
+
+	GetSaveFileName(&openFileStruct);
+	std::wstring filePath((LPWSTR) &filename);
+	
+	HANDLE file = CreateFile(filePath.c_str(), GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	SetEndOfFile(file);
+
+	DWORD qqq;
+	WriteFile(file, "NVVT", 4, &qqq, NULL);
+
+	unsigned int textSize = textManagerState.text.size() * sizeof(wchar_t);
+	WriteFile(file, &textSize, sizeof(textSize), &qqq, NULL);
+
+	WriteFile(file, textManagerState.text.c_str(), textSize, &qqq, NULL);
+
+	unsigned int imagesCount = images.size();
+	WriteFile(file, &imagesCount, sizeof(imagesCount), &qqq, NULL);
+
+	for (int i = 0; i < imagesCount; ++i)
+	{
+		/*imagesManager->SaveImageToFile(i, file);
+		Gdiplus::Bitmap *bitmap = images.at(index);
+		HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, 0);
+	
+		CComPtr<IStream> memoryStream;
+		CreateStreamOnHGlobal(hGlobal, FALSE, &memoryStream);
+
+		CLSID pngClsid;
+		GetEncoderClsid(L"image/png", &pngClsid);
+		bitmap->Save(memoryStream, &pngClsid);
+
+		LPVOID buffer = GlobalLock(hGlobal);
+		unsigned int imageSize = GlobalSize(hGlobal);
+
+		WriteFile(file, &imageSize, sizeof(imageSize), &qqq, NULL);
+		WriteFile(file, buffer, imageSize, &qqq, NULL);
+
+		GlobalUnlock(hGlobal);
+
+		GlobalFree(hGlobal);*/
+	}
+
+	CloseHandle(file);
+}
+
+void TextManager::LoadFile()
+{
+	OPENFILENAME openFileStruct = {0};
+	TCHAR filename[256] = {0};
+
+	openFileStruct.lStructSize = sizeof(openFileStruct);
+	openFileStruct.lpstrFile = filename;
+	openFileStruct.nMaxFile = sizeof(filename);
+
+	GetOpenFileName(&openFileStruct);
+	std::wstring filePath((LPWSTR) &filename);
+	//textControl->SaveFile(filePath);
 }
