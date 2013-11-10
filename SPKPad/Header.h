@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <Windowsx.h>
+#include <atlbase.h>
+#include <objidl.h>
 #include <gdiplus.h>
 #pragma comment (lib, "gdiplus.lib")
 

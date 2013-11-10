@@ -519,34 +519,27 @@ void TextManager::SaveFile()
 	openFileStruct.nMaxFile = sizeof(filename);
 
 	GetSaveFileName(&openFileStruct);
-	std::wstring filePath((LPWSTR) &filename);
 	
-	HANDLE file = CreateFile(filePath.c_str(), GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE file = CreateFile(filename, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	SetEndOfFile(file);
 
-	DWORD qqq;
-	WriteFile(file, "NVVT", 4, &qqq, NULL);
-
-	unsigned int textSize = textManagerState.text.size() * sizeof(wchar_t);
-	WriteFile(file, &textSize, sizeof(textSize), &qqq, NULL);
-
-	WriteFile(file, textManagerState.text.c_str(), textSize, &qqq, NULL);
+	DWORD bytesWritten;
 
 	unsigned int imagesCount = images.size();
-	WriteFile(file, &imagesCount, sizeof(imagesCount), &qqq, NULL);
+	WriteFile(file, &imagesCount, sizeof(imagesCount), &bytesWritten, NULL);
 
 	for (int i = 0; i < imagesCount; ++i)
 	{
-		/*imagesManager->SaveImageToFile(i, file);
-		Gdiplus::Bitmap *bitmap = images.at(index);
+		Gdiplus::Bitmap *bitmap = images[i];
+		DWORD qqq;
 		HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, 0);
 	
-		CComPtr<IStream> memoryStream;
-		CreateStreamOnHGlobal(hGlobal, FALSE, &memoryStream);
+		CComPtr<IStream> stream;
+		CreateStreamOnHGlobal(hGlobal, FALSE, &stream);
 
 		CLSID pngClsid;
 		GetEncoderClsid(L"image/png", &pngClsid);
-		bitmap->Save(memoryStream, &pngClsid);
+		bitmap->Save(stream, &pngClsid);
 
 		LPVOID buffer = GlobalLock(hGlobal);
 		unsigned int imageSize = GlobalSize(hGlobal);
@@ -556,8 +549,12 @@ void TextManager::SaveFile()
 
 		GlobalUnlock(hGlobal);
 
-		GlobalFree(hGlobal);*/
+		GlobalFree(hGlobal);
 	}
+	unsigned int textSize = textManagerState.text.size() * sizeof(wchar_t);
+	WriteFile(file, &textSize, sizeof(textSize), &bytesWritten, NULL);
+
+	WriteFile(file, textManagerState.text.c_str(), textSize, &bytesWritten, NULL);
 
 	CloseHandle(file);
 }
@@ -572,6 +569,78 @@ void TextManager::LoadFile()
 	openFileStruct.nMaxFile = sizeof(filename);
 
 	GetOpenFileName(&openFileStruct);
-	std::wstring filePath((LPWSTR) &filename);
-	//textControl->SaveFile(filePath);
+
+	HANDLE file = CreateFile(filename, GENERIC_READ, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+	DWORD bytesReaden;
+	unsigned int countImages = 0;
+	ReadFile(file, &countImages, sizeof(countImages), &bytesReaden, NULL);
+
+	for (int i = 0; i < images.size(); ++i)
+	{
+		delete images[i];
+	}
+
+	images.clear();
+
+	for(int i = 0; i < countImages; i++)
+	{
+		unsigned int imageSize = 0;
+		ReadFile(file, &imageSize, sizeof(imageSize), &bytesReaden, NULL);
+		HGLOBAL hGlobal = GlobalAlloc(GMEM_FIXED, imageSize);
+		void *imageData = GlobalLock(hGlobal);
+		ReadFile(file, imageData, imageSize, &bytesReaden, NULL);
+		GlobalUnlock(hGlobal);
+
+		CComPtr<IStream> stream;
+		CreateStreamOnHGlobal(hGlobal, FALSE, &stream);
+
+		Gdiplus::Bitmap *bitmap = new Gdiplus::Bitmap(stream);
+		images.push_back(bitmap);
+
+		GlobalFree(hGlobal);
+	}
+	unsigned textSize = 0;
+
+	ReadFile(file, &textSize, sizeof(textSize), &bytesReaden, NULL);
+
+	TCHAR *massSimbol = new TCHAR[(textSize / 2) + 1];
+	massSimbol[(textSize / 2)] = 0;
+	ReadFile(file, massSimbol,textSize, &bytesReaden, NULL);
+	textManagerState.text = std::wstring(massSimbol);
+	delete[] massSimbol;
+
+	CloseHandle(file);
+	InvalidateRect(hWnd, NULL, true);
+}
+
+void TextManager::GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
+{
+   UINT  num = 0;          // number of image encoders
+   UINT  size = 0;         // size of the image encoder array in bytes
+
+   Gdiplus::ImageCodecInfo* pImageCodecInfo = NULL;
+
+   Gdiplus::GetImageEncodersSize(&num, &size);
+   if(size == 0)
+      return;  // Failure
+
+   pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+   if(pImageCodecInfo == NULL)
+      return;  // Failure
+
+   GetImageEncoders(num, size, pImageCodecInfo);
+
+   for(UINT j = 0; j < num; ++j)
+   {
+      if( wcscmp(pImageCodecInfo[j].MimeType, format) == 0 )
+      {
+         *pClsid = pImageCodecInfo[j].Clsid;
+         free(pImageCodecInfo);
+         return;  // Success
+      }
+   }
+
+   free(pImageCodecInfo);
+   return;  // Failure
 }
