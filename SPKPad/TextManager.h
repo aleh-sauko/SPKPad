@@ -42,6 +42,8 @@ public:
 
 	void DeleteSelection();
 private:
+	void GetEncoderClsid(const WCHAR* format, CLSID* pClsid);
+
 	HWND hWnd;
 	TextManagerState textManagerState;
 	std::vector<Line> lines;
