@@ -12,13 +12,6 @@ TextManager::TextManager(HWND hWnd)
 	imageIndex = -1;
 	scale = 1;
 
-	wstring fontNames[] = {L"comic.ttf", L"cour.ttf"};
-	int countOfFonts = sizeof(fontNames) / sizeof(fontNames[0]);
-	for (int i = 0; i < countOfFonts; ++i)
-	{
-		AddFontResourceEx(fontNames[i].c_str(), FR_PRIVATE, NULL);
-	}
-
 	wstring fontNames2[] = {L"Comic Sans MS", L"Courier New"};
 	for (int i = 0; i < 2; ++i)
 	{
@@ -35,12 +28,6 @@ TextManager::~TextManager(void)
 	for (unsigned int i = 0; i < fontDescriptors.size(); ++i)
 	{
 		DeleteObject(fontDescriptors.at(i));
-	}
-	wstring fontNames[] = {L"comic.ttf", L"cour.ttf"};
-	int countOfFonts = sizeof(fontNames) / sizeof(fontNames[0]);
-	for (int i = 0; i < countOfFonts; ++i)
-	{
-		RemoveFontResourceEx(fontNames[i].c_str(), FR_PRIVATE, NULL);
 	}
 
 	for (int i = 0; i < images.size(); ++i)
